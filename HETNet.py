@@ -96,18 +96,15 @@ class HETNET(nn.Module):
         self.linear_frequency4d = nn.Linear(self.num_e, args.embedding_dim * 3)
         self.weights_init(self.linear_frequency4d)
 
-        #这是历史部分
         self.linear_pred_layer_s1 = nn.Linear(2 * args.embedding_dim, args.embedding_dim)
         self.linear_pred_layer_o1 = nn.Linear(2 * args.embedding_dim, args.embedding_dim)
 
-        #这是非历史部分
         self.linear_pred_layer_s2 = nn.Linear(2 * args.embedding_dim, args.embedding_dim)
         self.linear_pred_layer_o2 = nn.Linear(2 * args.embedding_dim, args.embedding_dim)
         
         self.encoder1 = AE(2*args.embedding_dim,args.embedding_dim)
         self.encoder1.apply(self.weights_init)
         
-        #二分类器
         self.oracle_layer = Oracle(args.embedding_dim*3, 1)
         self.oracle_layer1 = Oracle(args.embedding_dim*2, 1)
         self.oracle_layer.apply(self.weights_init)
@@ -128,7 +125,7 @@ class HETNET(nn.Module):
         self.weights_init(self.linear_pred_layer_o2)
 
         self.dropout = nn.Dropout(args.dropout)
-        self.dropout1 = nn.Dropout(0.1)        #用于simcse
+        self.dropout1 = nn.Dropout(0.1)        #for simcse
         self.dropout2 = nn.Dropout(0.25)
         self.logSoftmax = nn.LogSoftmax()
         self.softmax = nn.Softmax()
@@ -192,25 +189,11 @@ class HETNET(nn.Module):
         o_frequency_hidden = torch.tanh(self.linear_frequency(o_frequency_p))
 
         if mode_lk == 'Training':
-            #改了这里
             s_frequency_d = F.softmax(c_s_frequency, dim=1)
             o_frequency_d = F.softmax(c_o_frequency, dim=1)
-            #实验1:先用历史的频率直接做映射，59.48
-            # #实验2:用current的频率做映射， 59.44
-            # 实验三：用s_frequency_p 59.40
-            # 实验四：用s_frequency_d做映射 59.46
-            # s_f + 4 init 59.46
-            #with tanh 59.44
-            # s_frequency_hidden_d = self.linear_frequency4d(s_frequency)
-            # o_frequency_hidden_d = self.linear_frequency4d(o_frequency) 59.48
-            #4d no init 59.38
-            #normal noise
-            #noise = self.normal_distribution.sample((c_s_frequency.shape[0], 600)).cuda()
+
             s_frequency_hidden_d = self.normal_distribution.sample((c_s_frequency.shape[0], 600)).cuda()
             o_frequency_hidden_d = self.normal_distribution.sample((c_s_frequency.shape[0], 600)).cuda()
-            #original
-            #s_frequency_hidden_d = self.linear_frequency4d(s_frequency) + noise
-            #o_frequency_hidden_d = self.linear_frequency4d(o_frequency) + noise
 
             s_nce_loss, _ = self.calculate_nce_loss(s, o, r, self.rel_embeds[:self.num_rel],
                                                     self.linear_pred_layer_s1, self.linear_pred_layer_s2,
@@ -249,7 +232,7 @@ class HETNET(nn.Module):
             for i in range(quadruples.shape[0]):
                 s_history_oid.append([])
                 o_history_sid.append([])
-                for con_events in s_history_event_o[i]:           #遍历历史事件中的每一个，然后加到最后面去
+                for con_events in s_history_event_o[i]:           
                     s_history_oid[-1] += con_events[:, 1].tolist()
                 for con_events in o_history_event_s[i]:
                     o_history_sid[-1] += con_events[:, 1].tolist()
@@ -288,7 +271,7 @@ class HETNET(nn.Module):
                     #s_mask[i,sz_oid[:,0]] = 1
                 else:
                     
-                    s_probs[i][s_history_oid[i]] = 0  #将历史o的概率设置为0
+                    s_probs[i][s_history_oid[i]] = 0  
                     m = torch.distributions.Categorical(s_probs[i])
                     sz_oid = m.sample((int(non_sample+1),))  
                     s_mask[i, sz_oid] = 1
@@ -299,15 +282,11 @@ class HETNET(nn.Module):
                 non_o_pred = 1 - o_pred_history_label[i].item()
                 non_sample = len(o_history_sid[i]) / o_pred_history_label[i].item() * non_o_pred   
                 if len(o_history_sid[i]) == 0 :
-                    #o_mask[i, :] = 1
-                    #o_mask[i, o_history_sid[i]] = 0
-                    #修改的1
+
                     m = torch.distributions.Categorical(o_probs[i])
                     sz_sid = m.sample((100,))
                     o_mask[i,sz_sid] = 1
-                    #修改的1
-                    #sz_sid = torch.nonzero(o_mask_1[i,:]>1)
-                    #o_mask[i,sz_sid[:,0]] = 1
+
                 else:
                     o_probs[i][o_history_sid[i]] = 0
                     m = torch.distributions.Categorical(o_probs[i])#因为这里可能会从其他的历史中的选择！
@@ -322,13 +301,13 @@ class HETNET(nn.Module):
                 o_mask = F.softmax(o_mask, dim=1)
 
             t3 = time.time()#2.19
-            #这里告诉我们sub_rank1 和sub_rank2是一样的，区别在于是否用了mask
+
             s_total_loss1, sub_rank1 = self.link_predict(s_nce_loss, s_preds,  s, o, r,
                                                          s_mask, total_data, 's', True)
             o_total_loss1, obj_rank1 = self.link_predict(o_nce_loss, o_preds,  o, s, r,
                                                          o_mask, total_data, 'o', True)
             batch_loss1 = (s_total_loss1 + o_total_loss1) / 2.0
-            #不用oracle
+            #no oracle
             s_total_loss2, sub_rank2 = self.link_predict(s_nce_loss, s_preds,  s, o, r,
                                                          s_mask, total_data, 's', False)
             o_total_loss2, obj_rank2 = self.link_predict(o_nce_loss, o_preds,  o, s, r,
@@ -352,7 +331,7 @@ class HETNET(nn.Module):
             #     else:
             #         o_mask_gt[i, :] = 1
             #         o_mask_gt[i, o_history_sid[i]] = 0
-            #这个是带真mask的部分
+            
             # s_total_loss3, sub_rank3 = self.link_predict(s_nce_loss, s_preds,  s, o, r,
             #                                              s_mask_gt, total_data, 's', True)
             # o_total_loss3, obj_rank3 = self.link_predict(o_nce_loss, o_preds,  o, s, r,
@@ -370,25 +349,15 @@ class HETNET(nn.Module):
             return (s_ce_loss + o_ce_loss) / 2.0 + self.oracle_l1(0.01,self.oracle_layer)
 
     def oracle_loss(self, actor1, r, rel_embeds, history_label, frequency_hidden):
-        """
-        这个是二分类器的损失计算过程
-        """
+
         _, z = self.calculate_attention_loss(actor1,r,self.rel_embeds[:self.num_rel],frequency_hidden)
-        #o,h = self.oracle_layer(torch.cat((self.entity_embeds[actor1], rel_embeds[r], frequency_hidden), dim=1))
         o,h = self.oracle_layer(z)
         temp = h.mm(self.entity_embeds.transpose(0, 1))
-        #print(torch.max(temp).item())
-        #print(torch.min(temp).item())
+
         temp = F.normalize(temp,dim=1)
-        #print(torch.any(temp>0),torch.any(temp<0))
-        #print(torch.any(torch.isnan(temp)),torch.any(torch.isinf(temp)))
-        #temp = torch.nan_to_num(temp, nan=0.0, posinf=0.0, neginf=0.0)
+
         preds1 = F.softmax(temp, dim=1)
-        #preds1[preds1<0] = 0
-        #preds1 = torch.nan_to_num(preds1,nan=0.0, posinf=0.0, neginf=0.0)
-        #print(torch.sum(torch.isnan(preds1)),torch.sum(torch.isinf(preds1)))
-        #a = h.mm(self.entity_embeds.transpose(0, 1))
-        #assert not torch.isnan(a).any() and not torch.isinf(a).any()
+
         history_label_pred = torch.sigmoid(o)
         # tmp_label = torch.squeeze(history_label_pred).clone().detach()
         # tmp_label[torch.where(tmp_label > 0.5)[0]] = 1
@@ -402,13 +371,7 @@ class HETNET(nn.Module):
         return ce_loss, history_label_pred, None,preds1
 
     def calculate_nce_loss(self, actor1, actor2, r, rel_embeds, linear1, linear2, history_tag, non_history_tag,label=None,reverse=True):
-        """
-        version1:保持原样
-        """
-        #公式6
-        #这里的actor1就是送入的实体
-        #去掉history tag精度会大幅下降
-        #1024,23033
+
         x = torch.cat((self.entity_embeds[actor1],rel_embeds[r]),dim=1)
         
         #new
@@ -435,17 +398,14 @@ class HETNET(nn.Module):
         loss1 = self.criterion(cos_sim,labels)
         
         preds1_n = F.softmax(sp_h.mm(self.entity_embeds.transpose(0, 1)) + history_exist_pred * history_tag, dim=1)
-        #公式7
+
         preds_raw2 = self.tanh(linear2(
             self.dropout(torch.cat((self.entity_embeds[actor1], rel_embeds[r]), dim=1))))
         preds2 = F.softmax(preds_raw2.mm(self.entity_embeds.transpose(0, 1)) + (1-history_exist_pred) * non_history_tag, dim=1)
 
         preds2_n = F.softmax(sp_h.mm(self.entity_embeds.transpose(0, 1)) + (1-history_exist_pred) *non_history_tag, dim=1)
-        #这里的pred1和2代表的是论文中的大H
+
         nce = torch.sum(torch.gather(torch.log(preds1 +  preds2), 1, actor2.view(-1, 1)))
-        #因为pred1和2相当于每个位置是softmax值，只需要根据分子的索引就可以求和了。
-        #nce1 = torch.sum(torch.gather(torch.log(preds1_n +  preds2_n), 1, actor2.view(-1, 1)))
-        #通过dim=1，然后根据actor，相当于每行选一个值。
         nce /= -1. * actor2.shape[0]
         #nce1 /= -1. * actor2.shape[0]
         
@@ -494,7 +454,7 @@ class HETNET(nn.Module):
                       'Prediction:', entity2id[pred_actor2[i].item()], file=f)
 
             o_label = cur_o
-            ground = preds[i, cur_o].clone().item()  #正确答案所在的o的预测概率为base概率
+            ground = preds[i, cur_o].clone().item() 
             if self.args.filtering:
                 if pred_known == 's':
                     s_id = torch.nonzero(all_triples[:, 0] == cur_s).view(-1)
@@ -507,10 +467,10 @@ class HETNET(nn.Module):
                     idx = s_id[idx]
                     idx = all_triples[idx, 0]
 
-                preds[i, idx] = 0  #在所有数据中出现的当前条query的所有可能的o的概率全部取为0
+                preds[i, idx] = 0  
                 preds[i, o_label] = ground
 
-            ob_pred_comp1 = (preds[i, :] > ground)#.data.cpu().numpy()#比正确答案大的
+            ob_pred_comp1 = (preds[i, :] > ground)#.data.cpu().numpy()
             ob_pred_comp2 = (preds[i, :] == ground)#.data.cpu().numpy()
             #ranks.append(np.sum(ob_pred_comp1) + ((np.sum(ob_pred_comp2) - 1.0) / 2) + 1)
             ranks.append(torch.sum(ob_pred_comp1) + ((torch.sum(ob_pred_comp2) - 1.0) / 2) + 1)
